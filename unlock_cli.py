@@ -52,31 +52,117 @@ def list_locked_apps(config: dict):
 def launch_app(exe_path: str) -> int | None:
     """
     Launch the given executable as a detached process.
+    On Windows, first tries a normal launch; if the OS raises WinError 740
+    (elevation required), automatically retries via ShellExecute 'runas'
+    which triggers the UAC prompt.
     Returns the PID on success, None on failure.
     """
-    try:
-        if sys.platform == "win32":
-            # Windows: DETACHED_PROCESS prevents the new window from being
-            # tied to this console session
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            proc = subprocess.Popen(
-                [exe_path],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                close_fds=True
-            )
-        else:
-            # Linux / macOS (for development / testing)
-            proc = subprocess.Popen(
-                [exe_path],
-                start_new_session=True,
-                close_fds=True
-            )
-        return proc.pid
-    except FileNotFoundError:
+    if not os.path.isfile(exe_path):
         print(f"\n  ✗  Executable not found: {exe_path}")
         logger.error(f"Launch failed – file not found: {exe_path}")
         return None
+
+    if sys.platform == "win32":
+        return _launch_windows(exe_path)
+    else:
+        return _launch_unix(exe_path)
+
+
+def _launch_windows(exe_path: str) -> int | None:
+    """Windows launcher: normal launch first, then elevated fallback."""
+    import ctypes
+
+    DETACHED_PROCESS       = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+    # ── Attempt 1: normal (non-elevated) launch ────────────────────────────
+    try:
+        proc = subprocess.Popen(
+            [exe_path],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True
+        )
+        return proc.pid
+
+    except OSError as e:
+        # WinError 740 = ERROR_ELEVATION_REQUIRED
+        if getattr(e, "winerror", None) != 740:
+            print(f"\n  ✗  Could not launch app: {e}")
+            logger.error(f"Launch failed: {e}")
+            return None
+
+    # ── Attempt 2: elevated launch via ShellExecute 'runas' ───────────────
+    print("\n  ℹ  App requires administrator privileges.")
+    print("  A UAC prompt will appear — please click Yes to continue.\n")
+    logger.info(f"Retrying '{exe_path}' with elevation (runas)")
+
+    try:
+        # ShellExecuteEx returns a handle; we use it to get the PID
+        import ctypes.wintypes as wt
+
+        SEE_MASK_NOCLOSEPROCESS = 0x00000040
+
+        class SHELLEXECUTEINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize",       ctypes.c_ulong),
+                ("fMask",        ctypes.c_ulong),
+                ("hwnd",         wt.HWND),
+                ("lpVerb",       ctypes.c_wchar_p),
+                ("lpFile",       ctypes.c_wchar_p),
+                ("lpParameters", ctypes.c_wchar_p),
+                ("lpDirectory",  ctypes.c_wchar_p),
+                ("nShow",        ctypes.c_int),
+                ("hInstApp",     wt.HINSTANCE),
+                ("lpIDList",     ctypes.c_void_p),
+                ("lpClass",      ctypes.c_wchar_p),
+                ("hkeyClass",    wt.HKEY),
+                ("dwHotKey",     ctypes.c_ulong),
+                ("hIconOrMonitor", ctypes.c_void_p),
+                ("hProcess",     wt.HANDLE),
+            ]
+
+        sei            = SHELLEXECUTEINFO()
+        sei.cbSize     = ctypes.sizeof(sei)
+        sei.fMask      = SEE_MASK_NOCLOSEPROCESS
+        sei.lpVerb     = "runas"             # triggers UAC elevation
+        sei.lpFile     = exe_path
+        sei.lpDirectory = os.path.dirname(exe_path)
+        sei.nShow      = 1                   # SW_SHOWNORMAL
+
+        ok = ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei))
+        if not ok:
+            err = ctypes.GetLastError()
+            if err == 1223:                  # ERROR_CANCELLED — user clicked No
+                print("  ✗  UAC prompt was cancelled. App not launched.")
+                logger.warning(f"UAC cancelled for '{exe_path}'")
+            else:
+                print(f"  ✗  ShellExecute failed (error {err})")
+                logger.error(f"ShellExecute failed with error {err} for '{exe_path}'")
+            return None
+
+        # Get PID from the process handle returned by ShellExecuteEx
+        h_process = sei.hProcess
+        if h_process:
+            pid = ctypes.windll.kernel32.GetProcessId(h_process)
+            ctypes.windll.kernel32.CloseHandle(h_process)
+            return pid if pid else -1   # -1 = launched but PID unknown
+        return -1   # Launched but no handle (some apps)
+
+    except Exception as e:
+        print(f"\n  ✗  Elevated launch failed: {e}")
+        logger.error(f"Elevated launch failed: {e}")
+        return None
+
+
+def _launch_unix(exe_path: str) -> int | None:
+    """Linux / macOS launcher (for development / testing)."""
+    try:
+        proc = subprocess.Popen(
+            [exe_path],
+            start_new_session=True,
+            close_fds=True
+        )
+        return proc.pid
     except PermissionError:
         print(f"\n  ✗  Permission denied: {exe_path}")
         logger.error(f"Launch failed – permission denied: {exe_path}")
