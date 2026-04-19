@@ -1,421 +1,680 @@
 """
-main_gui.py - App Locker Control Panel (Tkinter GUI)
-Provides a clean interface to:
-  • Add / remove locked apps
-  • View currently locked apps
-  • Start / stop the background watcher
+main_gui.py - App Locker Control Panel  (PyQt6 Edition)
+Premium dark UI with smooth animations, hover effects, and native Windows feel.
+
+Requires:  pip install PyQt6
 """
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-import subprocess
-import threading
 import sys
 import os
+import subprocess
+import ctypes
+
+# ── DPI awareness before Qt initialises ───────────────────────────────────────
+if sys.platform == "win32":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QLineEdit, QFileDialog, QTableWidget,
+    QTableWidgetItem, QHeaderView, QFrame, QSizePolicy,
+    QGraphicsDropShadowEffect, QMessageBox, QAbstractItemView,
+    QSpacerItem
+)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QColor, QCursor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import (
-    add_locked_app, remove_locked_app, load_config,
-    normalise_name, logger
-)
+from utils import add_locked_app, remove_locked_app, load_config, normalise_name, logger
 
-# ─── Colour Palette ───────────────────────────────────────────────────────────
-BG          = "#0f0f13"
-PANEL       = "#1a1a24"
-ACCENT      = "#7c5cfc"
-ACCENT_DARK = "#5a3dd4"
-DANGER      = "#e05260"
-SUCCESS     = "#3ddc97"
-TEXT        = "#e8e8f0"
-SUBTEXT     = "#888899"
-BORDER      = "#2a2a38"
-ENTRY_BG    = "#12121a"
-FONT_MAIN   = ("Segoe UI", 10)
-FONT_TITLE  = ("Segoe UI Semibold", 13)
-FONT_MONO   = ("Consolas", 9)
+# ══════════════════════════════════════════════════════════════════════════════
+#  DESIGN TOKENS
+# ══════════════════════════════════════════════════════════════════════════════
+C = {
+    "bg":           "#0b0b0f",
+    "surface":      "#13131a",
+    "surface2":     "#1c1c28",
+    "border":       "#252535",
+    "border_focus": "#3E436F",
+    "accent":       "#3E436F",
+    "accent_hover": "#3E436F",
+    "accent_press": "#3E436F",
+    "danger":       "#e05260",
+    "danger_hover": "#ea6370",
+    "success":      "#3ddc97",
+    "success_hover":"#4ef0a8",
+    "text":         "#eeeef5",
+    "subtext":      "#7777aa",
+    "muted":        "#44445a",
+    "input_bg":     "#0f0f18",
+    "row_alt":      "#161622",
+    "row_hover":    "#1e1e30",
+    "row_sel":      "#2a2050",
+    "header_bg":    "#181825",
+}
+
+STYLESHEET = f"""
+QMainWindow, QWidget#root {{
+    background: {C['bg']};
+}}
+QLabel {{
+    color: {C['text']};
+    background: transparent;
+}}
+QLineEdit {{
+    background: {C['input_bg']};
+    color: {C['text']};
+    border: 1.5px solid {C['border']};
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: "Consolas", monospace;
+    font-size: 11px;
+    selection-background-color: {C['accent']};
+}}
+QLineEdit:focus {{
+    border-color: {C['border_focus']};
+    background: #12121f;
+}}
+QLineEdit:hover {{
+    border-color: {C['muted']};
+}}
+QScrollBar:vertical {{
+    background: {C['surface']};
+    width: 6px;
+    border-radius: 3px;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {C['muted']};
+    border-radius: 3px;
+    min-height: 30px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {C['accent']};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QTableWidget {{
+    background: {C['surface']};
+    color: {C['text']};
+    border: none;
+    gridline-color: {C['border']};
+    font-size: 11px;
+    font-family: "Consolas", monospace;
+    selection-background-color: {C['row_sel']};
+    outline: none;
+    alternate-background-color: {C['row_alt']};
+}}
+QTableWidget::item {{
+    padding: 6px 12px;
+    border: none;
+}}
+QTableWidget::item:selected {{
+    background: {C['row_sel']};
+    color: {C['text']};
+}}
+QTableWidget::item:hover {{
+    background: {C['row_hover']};
+}}
+QHeaderView::section {{
+    background: {C['header_bg']};
+    color: {C['subtext']};
+    font-family: "Segoe UI Semibold", sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 8px 12px;
+    border: none;
+    border-bottom: 1px solid {C['border']};
+}}
+QToolTip {{
+    background: {C['surface2']};
+    color: {C['text']};
+    border: 1px solid {C['border']};
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+}}
+QMessageBox {{
+    background: {C['surface']};
+}}
+QMessageBox QLabel {{
+    color: {C['text']};
+    font-size: 12px;
+}}
+QMessageBox QPushButton {{
+    background: {C['accent']};
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 20px;
+    font-size: 11px;
+    min-width: 70px;
+}}
+QMessageBox QPushButton:hover {{
+    background: {C['accent_hover']};
+}}
+"""
 
 
-class AppLockerGUI:
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self.root.title("App Locker – Control Panel")
-        self.root.geometry("780x640")
-        self.root.minsize(700, 560)
-        self.root.configure(bg=BG)
+# ══════════════════════════════════════════════════════════════════════════════
+#  REUSABLE WIDGETS
+# ══════════════════════════════════════════════════════════════════════════════
 
-        # Watcher process handle
-        self._watcher_proc: subprocess.Popen | None = None
-        self._watcher_thread: threading.Thread | None = None
+class GlowButton(QPushButton):
+    def __init__(self, text, color=None, hover_color=None, parent=None):
+        super().__init__(text, parent)
+        color       = color or C["accent"]
+        hover_color = hover_color or color
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {color};
+                color: white;
+                border: none;
+                border-radius: 9px;
+                padding: 9px 18px;
+                font-family: "Segoe UI Semibold", sans-serif;
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {hover_color};
+            }}
+            QPushButton:pressed {{
+                background: {color};
+                padding-top: 11px;
+                padding-bottom: 7px;
+            }}
+            QPushButton:disabled {{
+                background: {C['muted']};
+                color: {C['subtext']};
+            }}
+        """)
 
+    def add_shadow(self, color=None, blur=18):
+        s = QGraphicsDropShadowEffect(self)
+        s.setBlurRadius(blur)
+        s.setOffset(0, 3)
+        s.setColor(QColor(color or "#7c5cfc80"))
+        self.setGraphicsEffect(s)
+
+
+class SectionCard(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: {C['surface']};
+                border: 1px solid {C['border']};
+                border-radius: 14px;
+            }}
+        """)
+        s = QGraphicsDropShadowEffect(self)
+        s.setBlurRadius(40)
+        s.setOffset(0, 8)
+        s.setColor(QColor(0, 0, 0, 80))
+        self.setGraphicsEffect(s)
+
+
+class FieldLabel(QLabel):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(f"""
+            color: {C['subtext']};
+            font-family: "Segoe UI", sans-serif;
+            font-size: 10px;
+            font-weight: 600;
+            background: transparent;
+        """)
+
+
+class Divider(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.HLine)
+        self.setFixedHeight(1)
+        self.setStyleSheet(f"background: {C['border']}; border: none;")
+
+
+class StatusDot(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._active = False
+        self._blink  = True
+        self._timer  = QTimer(self)
+        self._timer.timeout.connect(self._do_blink)
+        self.set_status(False)
+
+    def set_status(self, active: bool):
+        self._active = active
+        if active:
+            self._timer.start(1200)
+        else:
+            self._timer.stop()
+        self._render(C['success'] if active else C['danger'])
+
+    def _do_blink(self):
+        self._blink = not self._blink
+        self._render(C['success'] if self._blink else "#2a8060")
+
+    def _render(self, color: str):
+        label = "Active" if self._active else "Stopped"
+        self.setText(f"●  Watcher: {label}")
+        self.setStyleSheet(f"""
+            color: {color};
+            font-family: "Segoe UI Semibold", sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            background: transparent;
+            padding: 4px 12px;
+        """)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MAIN WINDOW
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AppLockerWindow(QMainWindow):
+
+    def __init__(self):
+        super().__init__()
+        self._watcher_proc = None
+        self._setup_window()
         self._build_ui()
         self._refresh_table()
-
-        # Auto-start watcher on launch
         self._start_watcher()
 
-        # Clean shutdown
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  UI CONSTRUCTION
-    # ══════════════════════════════════════════════════════════════════════════
+    def _setup_window(self):
+        self.setWindowTitle("App Locker  –  Control Panel")
+        self.resize(980, 700)
+        self.setMinimumSize(820, 580)
+        central = QWidget()
+        central.setObjectName("root")
+        self.setCentralWidget(central)
+        self._root = QVBoxLayout(central)
+        self._root.setContentsMargins(0, 0, 0, 0)
+        self._root.setSpacing(0)
 
     def _build_ui(self):
-        # ── Header bar ────────────────────────────────────────────────────
-        header = tk.Frame(self.root, bg=PANEL, height=56)
-        header.pack(fill="x")
-        header.pack_propagate(False)
+        self._build_titlebar()
+        self._build_body()
+        self._build_statusbar()
 
-        tk.Label(
-            header, text="🔐  App Locker",
-            bg=PANEL, fg=TEXT, font=("Segoe UI Semibold", 15),
-            padx=20
-        ).pack(side="left", pady=10)
+    # ── Title bar ─────────────────────────────────────────────────────────────
+    def _build_titlebar(self):
+        bar = QWidget()
+        bar.setFixedHeight(60)
+        bar.setStyleSheet(f"""
+            QWidget {{
+                background: {C['surface']};
+                border-bottom: 1px solid {C['border']};
+            }}
+        """)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(24, 0, 24, 0)
 
-        # Watcher status indicator
-        self._status_var = tk.StringVar(value="● Watcher: starting…")
-        self._status_lbl = tk.Label(
-            header, textvariable=self._status_var,
-            bg=PANEL, fg=SUBTEXT, font=FONT_MAIN, padx=20
-        )
-        self._status_lbl.pack(side="right", pady=10)
+        logo = QLabel("🔐")
+        logo.setStyleSheet("font-size: 22px; background: transparent;")
 
-        # ── Main split layout ─────────────────────────────────────────────
-        body = tk.Frame(self.root, bg=BG)
-        body.pack(fill="both", expand=True, padx=16, pady=14)
+        title = QLabel("App Locker")
+        title.setStyleSheet(f"""
+            color: {C['text']};
+            font-family: "Segoe UI Semibold", sans-serif;
+            font-size: 17px;
+            font-weight: 700;
+            background: transparent;
+        """)
 
-        body.columnconfigure(0, weight=1)
-        body.columnconfigure(1, weight=2)
-        body.rowconfigure(0, weight=1)
+        sub = QLabel("Control Panel")
+        sub.setStyleSheet(f"""
+            color: {C['subtext']};
+            font-size: 11px;
+            background: transparent;
+            margin-top: 4px;
+            margin-left: 4px;
+        """)
 
-        self._build_form(body)
-        self._build_table(body)
+        lay.addWidget(logo)
+        lay.addSpacing(8)
+        lay.addWidget(title)
+        lay.addWidget(sub)
+        lay.addStretch()
 
-        # ── Status bar ───────────────────────────────────────────────────
-        statusbar = tk.Frame(self.root, bg=BORDER, height=28)
-        statusbar.pack(fill="x", side="bottom")
-        statusbar.pack_propagate(False)
+        self._status_dot = StatusDot()
+        lay.addWidget(self._status_dot)
+        self._root.addWidget(bar)
 
-        self._info_var = tk.StringVar(value="Ready.")
-        tk.Label(
-            statusbar, textvariable=self._info_var,
-            bg=BORDER, fg=SUBTEXT, font=FONT_MONO, padx=12
-        ).pack(side="left", pady=4)
+    # ── Body ──────────────────────────────────────────────────────────────────
+    def _build_body(self):
+        body = QWidget()
+        body.setStyleSheet(f"background: {C['bg']};")
+        lay = QHBoxLayout(body)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(16)
+        lay.addWidget(self._build_form_panel(), stretch=0)
+        lay.addWidget(self._build_table_panel(), stretch=1)
+        self._root.addWidget(body, stretch=1)
 
-    # ─── Left panel: Add app form ─────────────────────────────────────────────
-    def _build_form(self, parent):
-        frame = tk.Frame(parent, bg=PANEL, bd=0, highlightthickness=1,
-                         highlightbackground=BORDER)
-        frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+    # ── Form panel ────────────────────────────────────────────────────────────
+    def _build_form_panel(self):
+        card = SectionCard()
+        card.setFixedWidth(308)
+        vlay = QVBoxLayout(card)
+        vlay.setContentsMargins(22, 22, 22, 22)
+        vlay.setSpacing(0)
 
-        tk.Label(frame, text="Lock New App",
-                 bg=PANEL, fg=TEXT, font=FONT_TITLE,
-                 pady=14, padx=16).pack(anchor="w")
+        h = QLabel("Lock New App")
+        h.setStyleSheet(f"color:{C['text']}; font-family:'Segoe UI Semibold'; font-size:14px; font-weight:700; background:transparent;")
+        vlay.addWidget(h)
+        vlay.addSpacing(3)
 
-        sep = tk.Frame(frame, bg=BORDER, height=1)
-        sep.pack(fill="x")
+        s = QLabel("Select an executable and set a password")
+        s.setStyleSheet(f"color:{C['subtext']}; font-size:10px; background:transparent;")
+        vlay.addWidget(s)
+        vlay.addSpacing(16)
+        vlay.addWidget(Divider())
+        vlay.addSpacing(18)
 
-        inner = tk.Frame(frame, bg=PANEL, padx=16, pady=14)
-        inner.pack(fill="both", expand=True)
+        # Path
+        vlay.addWidget(FieldLabel("EXECUTABLE PATH"))
+        vlay.addSpacing(5)
+        pr = QHBoxLayout(); pr.setSpacing(6)
+        self._path_edit = QLineEdit()
+        self._path_edit.setPlaceholderText("C:\\Program Files\\App.exe")
+        self._path_edit.textChanged.connect(self._sync_name)
+        pr.addWidget(self._path_edit)
+        bb = GlowButton("Browse", C["accent"], C["accent_hover"])
+        bb.setFixedWidth(72); bb.clicked.connect(self._browse_file)
+        pr.addWidget(bb)
+        vlay.addLayout(pr)
+        vlay.addSpacing(14)
 
-        # ── App path ──────────────────────────────────────────────────────
-        self._lbl(inner, "Executable Path")
-        path_row = tk.Frame(inner, bg=PANEL)
-        path_row.pack(fill="x", pady=(0, 10))
+        # Name
+        vlay.addWidget(FieldLabel("APP NAME  (auto-filled)"))
+        vlay.addSpacing(5)
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("App.exe")
+        vlay.addWidget(self._name_edit)
+        vlay.addSpacing(14)
 
-        self._path_var = tk.StringVar()
-        path_entry = tk.Entry(
-            path_row, textvariable=self._path_var,
-            bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
-            relief="flat", bd=6, font=FONT_MONO
-        )
-        path_entry.pack(side="left", fill="x", expand=True)
+        # Password
+        vlay.addWidget(FieldLabel("PASSWORD"))
+        vlay.addSpacing(5)
+        self._pw_edit = QLineEdit()
+        self._pw_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._pw_edit.setPlaceholderText("Min 4 characters")
+        vlay.addWidget(self._pw_edit)
+        vlay.addSpacing(14)
 
-        self._btn(path_row, "Browse", self._browse_file,
-                  color=ACCENT).pack(side="right", padx=(6, 0))
+        # Confirm
+        vlay.addWidget(FieldLabel("CONFIRM PASSWORD"))
+        vlay.addSpacing(5)
+        self._pw2_edit = QLineEdit()
+        self._pw2_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._pw2_edit.setPlaceholderText("Repeat password")
+        vlay.addWidget(self._pw2_edit)
+        vlay.addSpacing(22)
 
-        # ── App display name ──────────────────────────────────────────────
-        self._lbl(inner, "App Name  (auto-filled)")
-        self._name_var = tk.StringVar()
-        tk.Entry(
-            inner, textvariable=self._name_var,
-            bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
-            relief="flat", bd=6, font=FONT_MONO
-        ).pack(fill="x", pady=(0, 10))
+        # Lock button
+        lb = GlowButton("🔒   Lock This App", C["accent"], C["accent_hover"])
+        lb.setFixedHeight(44); lb.add_shadow(); lb.clicked.connect(self._lock_app)
+        vlay.addWidget(lb)
 
-        # Sync name from path
-        self._path_var.trace_add("write", self._sync_name)
+        vlay.addSpacing(22)
+        vlay.addWidget(Divider())
+        vlay.addSpacing(16)
 
-        # ── Password ──────────────────────────────────────────────────────
-        self._lbl(inner, "Password")
-        self._pw_var = tk.StringVar()
-        tk.Entry(
-            inner, textvariable=self._pw_var,
-            show="●",
-            bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
-            relief="flat", bd=6, font=FONT_MAIN
-        ).pack(fill="x", pady=(0, 4))
+        wl = QLabel("WATCHER SERVICE")
+        wl.setStyleSheet(f"color:{C['subtext']}; font-family:'Segoe UI Semibold'; font-size:10px; font-weight:600; background:transparent;")
+        vlay.addWidget(wl)
+        vlay.addSpacing(8)
 
-        # ── Confirm password ──────────────────────────────────────────────
-        self._lbl(inner, "Confirm Password")
-        self._pw2_var = tk.StringVar()
-        tk.Entry(
-            inner, textvariable=self._pw2_var,
-            show="●",
-            bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
-            relief="flat", bd=6, font=FONT_MAIN
-        ).pack(fill="x", pady=(0, 16))
+        cr = QHBoxLayout(); cr.setSpacing(8)
+        stb = GlowButton("▶  Start", C["success"], C["success_hover"])
+        stb.setFixedHeight(36); stb.clicked.connect(self._start_watcher)
+        spb = GlowButton("■  Stop",  C["danger"],  C["danger_hover"])
+        spb.setFixedHeight(36); spb.clicked.connect(self._stop_watcher)
+        cr.addWidget(stb); cr.addWidget(spb)
+        vlay.addLayout(cr)
+        vlay.addStretch()
+        return card
 
-        # ── Lock button ───────────────────────────────────────────────────
-        self._btn(inner, "🔒  Lock This App", self._lock_app,
-                  color=ACCENT, fullwidth=True).pack(fill="x", pady=(0, 8))
+    # ── Table panel ───────────────────────────────────────────────────────────
+    def _build_table_panel(self):
+        card = SectionCard()
+        vlay = QVBoxLayout(card)
+        vlay.setContentsMargins(20, 18, 20, 16)
+        vlay.setSpacing(0)
 
-        # ── Watcher controls ──────────────────────────────────────────────
-        sep2 = tk.Frame(inner, bg=BORDER, height=1)
-        sep2.pack(fill="x", pady=(10, 12))
+        hrow = QHBoxLayout()
+        ht = QLabel("Locked Applications")
+        ht.setStyleSheet(f"color:{C['text']}; font-family:'Segoe UI Semibold'; font-size:14px; font-weight:700; background:transparent;")
+        hrow.addWidget(ht)
+        hrow.addStretch()
 
-        tk.Label(inner, text="Watcher Service",
-                 bg=PANEL, fg=SUBTEXT, font=("Segoe UI", 9)).pack(anchor="w")
+        self._count_badge = QLabel("0 apps")
+        self._count_badge.setStyleSheet(f"background:{C['surface2']}; color:{C['subtext']}; font-size:10px; border-radius:8px; padding:3px 10px;")
+        hrow.addWidget(self._count_badge)
+        hrow.addSpacing(10)
 
-        ctrl_row = tk.Frame(inner, bg=PANEL)
-        ctrl_row.pack(fill="x", pady=(6, 0))
+        rfb = QPushButton("↻  Refresh")
+        rfb.setFixedHeight(32)
+        rfb.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        rfb.setStyleSheet(f"""
+            QPushButton {{
+                background:{C['surface2']}; color:{C['subtext']};
+                border:1px solid {C['border']}; border-radius:8px;
+                padding:0 14px; font-family:"Segoe UI Semibold"; font-size:11px;
+            }}
+            QPushButton:hover {{ background:{C['border']}; color:{C['text']}; }}
+        """)
+        rfb.clicked.connect(self._refresh_table)
+        hrow.addWidget(rfb)
+        hrow.addSpacing(8)
 
-        self._btn(ctrl_row, "▶ Start", self._start_watcher,
-                  color=SUCCESS).pack(side="left", expand=True, fill="x", padx=(0, 4))
-        self._btn(ctrl_row, "■ Stop", self._stop_watcher,
-                  color=DANGER).pack(side="left", expand=True, fill="x")
+        rmb = GlowButton("🗑  Remove Selected", C["danger"], C["danger_hover"])
+        rmb.setFixedHeight(32); rmb.clicked.connect(self._remove_app)
+        hrow.addWidget(rmb)
 
-    # ─── Right panel: Locked apps table ──────────────────────────────────────
-    def _build_table(self, parent):
-        frame = tk.Frame(parent, bg=PANEL, bd=0, highlightthickness=1,
-                         highlightbackground=BORDER)
-        frame.grid(row=0, column=1, sticky="nsew")
+        vlay.addLayout(hrow)
+        vlay.addSpacing(14)
+        vlay.addWidget(Divider())
+        vlay.addSpacing(10)
 
-        header_row = tk.Frame(frame, bg=PANEL)
-        header_row.pack(fill="x", padx=16, pady=12)
+        self._table = QTableWidget()
+        self._table.setColumnCount(4)
+        self._table.setHorizontalHeaderLabels(["App Name", "Path", "Date Added", "Status"])
+        self._table.verticalHeader().setVisible(False)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setShowGrid(True)
+        self._table.setAlternatingRowColors(True)
 
-        tk.Label(header_row, text="Locked Applications",
-                 bg=PANEL, fg=TEXT, font=FONT_TITLE).pack(side="left")
+        hdr = self._table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.verticalHeader().setDefaultSectionSize(38)
 
-        self._btn(header_row, "🗑 Remove Selected", self._remove_app,
-                  color=DANGER).pack(side="right")
-        self._btn(header_row, "↻ Refresh", self._refresh_table,
-                  color=ACCENT).pack(side="right", padx=(0, 8))
+        vlay.addWidget(self._table)
+        return card
 
-        sep = tk.Frame(frame, bg=BORDER, height=1)
-        sep.pack(fill="x")
+    # ── Status bar ────────────────────────────────────────────────────────────
+    def _build_statusbar(self):
+        bar = QWidget()
+        bar.setFixedHeight(30)
+        bar.setStyleSheet(f"QWidget {{ background:{C['surface']}; border-top:1px solid {C['border']}; }}")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(20, 0, 20, 0)
 
-        # Table
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Locker.Treeview",
-                         background=ENTRY_BG,
-                         foreground=TEXT,
-                         fieldbackground=ENTRY_BG,
-                         borderwidth=0,
-                         rowheight=28,
-                         font=FONT_MONO)
-        style.configure("Locker.Treeview.Heading",
-                         background=BORDER,
-                         foreground=SUBTEXT,
-                         borderwidth=0,
-                         font=("Segoe UI Semibold", 9))
-        style.map("Locker.Treeview",
-                  background=[("selected", ACCENT_DARK)],
-                  foreground=[("selected", TEXT)])
+        self._status_lbl = QLabel("Ready.")
+        self._status_lbl.setStyleSheet(f"color:{C['subtext']}; font-family:'Consolas',monospace; font-size:10px; background:transparent;")
+        lay.addWidget(self._status_lbl)
+        lay.addStretch()
 
-        cols = ("name", "path", "added")
-        self._tree = ttk.Treeview(
-            frame, columns=cols, show="headings",
-            style="Locker.Treeview", selectmode="browse"
-        )
-        self._tree.heading("name", text="App Name")
-        self._tree.heading("path", text="Path")
-        self._tree.heading("added", text="Added")
-        self._tree.column("name", width=130, minwidth=100)
-        self._tree.column("path", width=280, minwidth=160)
-        self._tree.column("added", width=140, minwidth=110)
-
-        scrollbar = ttk.Scrollbar(frame, orient="vertical",
-                                  command=self._tree.yview)
-        self._tree.configure(yscrollcommand=scrollbar.set)
-
-        self._tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
-        scrollbar.pack(side="right", fill="y", pady=8, padx=(0, 4))
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  WIDGET HELPERS
-    # ══════════════════════════════════════════════════════════════════════════
-
-    def _lbl(self, parent, text: str):
-        tk.Label(parent, text=text,
-                 bg=PANEL, fg=SUBTEXT, font=("Segoe UI", 9)
-                 ).pack(anchor="w", pady=(4, 2))
-
-    def _btn(self, parent, text: str, cmd, color=ACCENT, fullwidth=False):
-        b = tk.Button(
-            parent, text=text, command=cmd,
-            bg=color, fg="white", activebackground=color,
-            activeforeground="white",
-            relief="flat", bd=0, padx=12, pady=6,
-            font=("Segoe UI Semibold", 9), cursor="hand2"
-        )
-        return b
+        ver = QLabel("App Locker  v2.0  (PyQt6)")
+        ver.setStyleSheet(f"color:{C['muted']}; font-size:10px; background:transparent;")
+        lay.addWidget(ver)
+        self._root.addWidget(bar)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  CALLBACKS
     # ══════════════════════════════════════════════════════════════════════════
 
     def _browse_file(self):
-        path = filedialog.askopenfilename(
-            title="Select Executable",
-            filetypes=[("Executables", "*.exe"), ("All files", "*.*")]
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Select Executable", "C:\\",
+                                              "Executables (*.exe);;All Files (*.*)")
         if path:
-            self._path_var.set(path)
+            self._path_edit.setText(path)
 
-    def _sync_name(self, *_):
-        """Auto-populate the name field from the selected path."""
-        path = self._path_var.get()
+    def _sync_name(self, path):
         if path:
-            self._name_var.set(os.path.basename(path))
+            self._name_edit.setText(os.path.basename(path))
 
     def _lock_app(self):
-        path = self._path_var.get().strip()
-        name = self._name_var.get().strip()
-        pw   = self._pw_var.get()
-        pw2  = self._pw2_var.get()
+        path = self._path_edit.text().strip()
+        name = self._name_edit.text().strip()
+        pw   = self._pw_edit.text()
+        pw2  = self._pw2_edit.text()
 
-        # ── Validation ────────────────────────────────────────────────────
-        if not path:
-            messagebox.showerror("Error", "Please select an executable path.")
-            return
-        if not os.path.isfile(path):
-            messagebox.showerror("Error", f"File not found:\n{path}")
-            return
-        if not name:
-            messagebox.showerror("Error", "App name cannot be empty.")
-            return
-        if not pw:
-            messagebox.showerror("Error", "Password cannot be empty.")
-            return
-        if pw != pw2:
-            messagebox.showerror("Error", "Passwords do not match.")
-            return
-        if len(pw) < 4:
-            messagebox.showerror("Error", "Password must be at least 4 characters.")
-            return
+        if not path:            return self._alert("Please select an executable path.")
+        if not os.path.isfile(path): return self._alert(f"File not found:\n{path}")
+        if not name:            return self._alert("App name cannot be empty.")
+        if not pw:              return self._alert("Password cannot be empty.")
+        if len(pw) < 4:         return self._alert("Password must be at least 4 characters.")
+        if pw != pw2:           return self._alert("Passwords do not match.")
 
-        # ── Save ──────────────────────────────────────────────────────────
         if add_locked_app(name, path, pw):
             logger.info(f"GUI locked app: {name} -> {path}")
             self._info(f"✓  '{normalise_name(name)}' is now locked.")
             self._refresh_table()
-            # Clear form
-            self._path_var.set("")
-            self._name_var.set("")
-            self._pw_var.set("")
-            self._pw2_var.set("")
+            self._path_edit.clear(); self._name_edit.clear()
+            self._pw_edit.clear();   self._pw2_edit.clear()
         else:
-            messagebox.showerror("Error", "Failed to save config. Check logs.")
+            self._alert("Failed to save config. Check logs.")
 
     def _remove_app(self):
-        selected = self._tree.selection()
-        if not selected:
-            messagebox.showinfo("Info", "Select an app from the list first.")
-            return
+        row = self._table.currentRow()
+        if row < 0:
+            return self._alert("Select an app from the table first.", kind="info")
 
-        item    = self._tree.item(selected[0])
-        appname = item["values"][0]
-
-        if not messagebox.askyesno(
-            "Confirm Remove",
-            f"Remove lock on '{appname}'?\n\nThe app will be freely accessible again."
-        ):
+        appname = self._table.item(row, 0).text()
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Remove Lock")
+        dlg.setText(f"Remove lock on  <b>{appname}</b>?")
+        dlg.setInformativeText("The app will be freely accessible again.")
+        dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dlg.setDefaultButton(QMessageBox.StandardButton.No)
+        if dlg.exec() != QMessageBox.StandardButton.Yes:
             return
 
         if remove_locked_app(appname):
             logger.info(f"GUI removed lock: {appname}")
-            self._info(f"✓  '{appname}' has been unlocked and removed.")
+            self._info(f"✓  '{appname}' removed.")
             self._refresh_table()
         else:
-            messagebox.showerror("Error", f"Could not remove '{appname}'.")
+            self._alert(f"Could not remove '{appname}'.")
 
     def _refresh_table(self):
-        for row in self._tree.get_children():
-            self._tree.delete(row)
-
+        self._table.setRowCount(0)
         config = load_config()
-        for name, data in config.items():
-            if data.get("locked", True):
-                added = data.get("added_at", "")[:10]
-                path  = data.get("path", "")
-                self._tree.insert("", "end", values=(name, path, added))
+        locked = {k: v for k, v in config.items() if v.get("locked", True)}
+        self._table.setRowCount(len(locked))
 
-        count = len(self._tree.get_children())
+        for i, (name, data) in enumerate(locked.items()):
+            added = data.get("added_at", "")[:10]
+            path  = data.get("path", "")
+
+            ni = QTableWidgetItem(name)
+            pi = QTableWidgetItem(path)
+            ai = QTableWidgetItem(added)
+            si = QTableWidgetItem("🔒 Locked")
+            si.setForeground(QColor(C["danger"]))
+
+            for item in (ni, pi, ai, si):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            self._table.setItem(i, 0, ni)
+            self._table.setItem(i, 1, pi)
+            self._table.setItem(i, 2, ai)
+            self._table.setItem(i, 3, si)
+
+        count = len(locked)
+        self._count_badge.setText(f"{count} app{'s' if count != 1 else ''}")
         self._info(f"{count} app(s) currently locked.")
 
-    # ── Watcher controls ──────────────────────────────────────────────────────
     def _start_watcher(self):
         if self._watcher_proc and self._watcher_proc.poll() is None:
-            self._info("Watcher is already running.")
-            return
-
-        watcher_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "watcher.py")
+            return self._info("Watcher is already running.")
+        watcher_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watcher.py")
         try:
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self._watcher_proc = subprocess.Popen(
                 [sys.executable, watcher_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                creationflags=flags
             )
-            self._set_watcher_status(True)
+            self._status_dot.set_status(True)
             logger.info(f"Watcher started (PID {self._watcher_proc.pid})")
-            self._info(f"Watcher started (PID {self._watcher_proc.pid})")
+            self._info(f"Watcher started  (PID {self._watcher_proc.pid})")
         except Exception as e:
-            messagebox.showerror("Error", f"Could not start watcher:\n{e}")
+            self._alert(f"Could not start watcher:\n{e}")
 
     def _stop_watcher(self):
         if self._watcher_proc and self._watcher_proc.poll() is None:
             self._watcher_proc.terminate()
             self._watcher_proc = None
-            self._set_watcher_status(False)
+            self._status_dot.set_status(False)
             logger.info("Watcher stopped by user")
             self._info("Watcher stopped.")
         else:
             self._info("Watcher is not running.")
 
-    def _set_watcher_status(self, running: bool):
-        if running:
-            self._status_var.set("● Watcher: active")
-            self._status_lbl.configure(fg=SUCCESS)
-        else:
-            self._status_var.set("● Watcher: stopped")
-            self._status_lbl.configure(fg=DANGER)
+    def _info(self, msg):
+        self._status_lbl.setText(msg)
 
-    # ── Status bar ────────────────────────────────────────────────────────────
-    def _info(self, msg: str):
-        self._info_var.set(msg)
+    def _alert(self, msg, kind="error"):
+        dlg = QMessageBox(self)
+        dlg.setText(msg)
+        dlg.setWindowTitle("Error" if kind == "error" else "Info")
+        dlg.setIcon(QMessageBox.Icon.Critical if kind == "error" else QMessageBox.Icon.Information)
+        dlg.exec()
 
-    # ── Shutdown ──────────────────────────────────────────────────────────────
-    def _on_close(self):
+    def closeEvent(self, event):
         if self._watcher_proc and self._watcher_proc.poll() is None:
-            if messagebox.askyesno(
-                "Exit",
-                "The watcher is still running.\n\nStop the watcher and exit?"
-            ):
-                self._stop_watcher()
-                self.root.destroy()
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle("Exit")
+            dlg.setText("The watcher is still running.")
+            dlg.setInformativeText("Stop the watcher and exit?")
+            dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            dlg.setDefaultButton(QMessageBox.StandardButton.Yes)
+            if dlg.exec() == QMessageBox.StandardButton.Yes:
+                self._stop_watcher(); event.accept()
+            else:
+                event.ignore()
         else:
-            self.root.destroy()
+            event.accept()
 
 
-# ─── Entry Point ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ══════════════════════════════════════════════════════════════════════════════
+
 def main():
-    root = tk.Tk()
-    app  = AppLockerGUI(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    app.setApplicationName("App Locker")
+    app.setStyleSheet(STYLESHEET)
+    app.setFont(QFont("Segoe UI", 10))
+    window = AppLockerWindow()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
