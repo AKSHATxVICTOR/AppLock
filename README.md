@@ -9,7 +9,7 @@ from running unless unlocked via a password-protected CLI command.
 
 ```
 app-locker/
-├── main_gui.py      — Tkinter control panel (lock/unlock apps, manage watcher)
+├── main_gui.py      — PyQt6 control panel (lock/unlock apps, manage watcher)
 ├── watcher.py       — Background process monitor (kills locked apps on detection)
 ├── unlock_cli.py    — Terminal unlock tool (verify password → launch app)
 ├── utils.py         — Shared: hashing, config read/write, logging
@@ -23,6 +23,7 @@ app-locker/
 
 ```bash
 pip install psutil
+pip install PyQt6
 ```
 
 > Python 3.10+ is required (uses `int | None` type hints).  
