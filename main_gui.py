@@ -1,7 +1,4 @@
 """
-main_gui.py - App Locker Control Panel  (PyQt6 Edition)
-Premium dark UI with smooth animations, hover effects, and native Windows feel.
-
 Requires:  pip install PyQt6
 """
 
