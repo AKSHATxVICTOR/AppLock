@@ -1,11 +1,11 @@
-# 🔐 Windows App Locker
+# Windows App Locker
 
 A Python-based application locker for Windows that prevents selected `.exe` files
 from running unless unlocked via a password-protected CLI command.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 app-locker/
@@ -19,7 +19,7 @@ app-locker/
 
 ---
 
-## ⚙️ Requirements
+## Requirements
 
 ```bash
 pip install psutil
@@ -31,7 +31,7 @@ pip install PyQt6
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Open the Control Panel (GUI)
 
@@ -41,7 +41,7 @@ python main_gui.py
 
 - Click **Browse** → select a `.exe` file
 - Enter a password (min 4 characters)
-- Click **🔒 Lock This App**
+- Click ** Lock This App**
 - The **Watcher** starts automatically in the background
 
 ### 2. Unlock and Launch an App
@@ -73,7 +73,7 @@ python watcher.py
 
 ---
 
-## 🔐 Security Details
+## Security Details
 
 | Feature              | Implementation                          |
 |----------------------|-----------------------------------------|
@@ -87,7 +87,7 @@ python watcher.py
 
 ---
 
-## ⚠️ Important Notes
+## Important Notes
 
 - **Run as Administrator** on Windows for reliable process termination.
   Some system-protected apps may resist `psutil.terminate()`.
@@ -98,7 +98,7 @@ python watcher.py
 
 ---
 
-## 🔄 Functional Flow
+## Functional Flow
 
 ```
 User (GUI)  →  Locks app  →  config.json  ←  watcher.py reads
